@@ -6,90 +6,116 @@ from torchvision import transforms
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 
-# Define mask processing functions (equivalent to getRobotFishHumanReefWrecks, getSaliency, etc.)
-def get_robot_fish_human_reef_wrecks(mask):
-    imw, imh = mask.shape[0], mask.shape[1]
-    Human = np.zeros((imw, imh))
-    Robot = np.zeros((imw, imh))
-    Fish = np.zeros((imw, imh))
-    Reef = np.zeros((imw, imh))
-    Wreck = np.zeros((imw, imh))
-    
-    for i in range(imw):
-        for j in range(imh):
-            if mask[i, j, 0] == 0 and mask[i, j, 1] == 0 and mask[i, j, 2] == 1:
-                Human[i, j] = 1
-            elif mask[i, j, 0] == 1 and mask[i, j, 1] == 0 and mask[i, j, 2] == 0:
-                Robot[i, j] = 1
-            elif mask[i, j, 0] == 1 and mask[i, j, 1] == 1 and mask[i, j, 2] == 0:
-                Fish[i, j] = 1
-            elif mask[i, j, 0] == 1 and mask[i, j, 1] == 0 and mask[i, j, 2] == 1:
-                Reef[i, j] = 1
-            elif mask[i, j, 0] == 0 and mask[i, j, 1] == 1 and mask[i, j, 2] == 1:
-                Wreck[i, j] = 1
-    
-    return np.stack((Robot, Fish, Human, Reef, Wreck), -1)
+"""
+RGB color code and object categories:
+------------------------------------
+000 BW: Background waterbody
+001 HD: Human divers
+010 PF: Plants/sea-grass
+011 WR: Wrecks/ruins
+100 RO: Robots/instruments
+101 RI: Reefs and invertebrates
+110 FV: Fish and vertebrates
+111 SR: Sand/sea-floor (& rocks)
+"""
+mask_type={"HD":1,      # HD: Human divers
+           "PF":2,      # PF: Plants/sea-grass
+           "WR":3,      # WR: Wrecks/ruins
+           "RO":4,      # RO: Robots/instruments
+           "RI":5,      # RI: Reefs and invertebrates
+           "FV":6,      # FV: Fish and vertebrates
+           "SR":7       # SR: Sand/sea-floor (& rocks)
+           }      
 
-# Dataset class for SUIM data
+def mask_code_to_image(mask_code):
+    '''accept a 1-7 h*w array and turn it into h*w*rgb'''
+    rows, cols = mask_code.shape
+    bin_array = np.zeros((rows, cols, 3), dtype=int)
+    
+    for i in range(rows):
+        for j in range(cols):
+            binary_str = np.binary_repr(mask_code[i, j], width=3)
+            # print(mask_code[i, j],":",binary_str)
+            bin_array[i, j] = [int(bit) for bit in binary_str]
+            
+    return 255*bin_array
+
+def image_to_mask(rgb_mask):
+    '''convert h*w*rgb into 1-7 array'''
+    rgb_mask=rgb_mask/255.0
+    new_list=np.zeros([rgb_mask.shape[0],rgb_mask.shape[1]])
+    for i in range(rgb_mask.shape[0]):
+        for j in range(rgb_mask.shape[1]):  
+            binary_string = ''.join(str(int(x)) for x in rgb_mask[i][j])
+            new_list[i][j] = int(binary_string, 2)
+    return new_list
+
 class SUIMDataset(Dataset):
-    def __init__(self, img_dir, mask_dir, transform=None, sal=False):
-        self.img_paths = get_paths(img_dir)
-        self.mask_paths = get_paths(mask_dir)
+    def __init__(self, img_dir, mask_dir, transform=None, sal=False, target_size=(256, 256,3)):
+        self.img_dir = img_dir
+        self.mask_dir = mask_dir
+        
+        self.img_list = sorted(os.listdir(img_dir))
+        self.mask_list = sorted(os.listdir(mask_dir))
+        assert len(self.img_list)==len(self.mask_list),"the number of img and mask not paired"
+        
         self.transform = transform
         self.sal = sal
+        self.target_size = target_size
 
     def __len__(self):
-        return len(self.img_paths)
+        return len(self.img_list)
 
     def __getitem__(self, idx):
-        # Load image and mask
-        img = Image.open(self.img_paths[idx]).convert('RGB')
-        mask = Image.open(self.mask_paths[idx]).convert('RGB')
+        # Open image and masks
+        img = Image.open(f"{self.img_dir}/{self.img_list[idx]}")
+        mask = Image.open(f"{self.mask_dir}/{self.mask_list[idx]}")
 
-        # Apply transformations
         if self.transform:
             img = self.transform(img)
             mask = self.transform(mask)
+        
+        img = np.array(img)/255.0
+        mask = np.array(mask)
+   
+        mask=image_to_mask(mask)
+        human_mask = np.where(mask == mask_type["HD"], 1, 0)
+        plant_mask = np.where(mask == mask_type["PF"], 1, 0)
+        wreck_mask = np.where(mask == mask_type['WR'], 1, 0)
+        robot_mask = np.where(mask == mask_type['RO'], 1, 0)
+        reef_mask = np.where(mask == mask_type['RI'], 1, 0)
+        fish_mask = np.where(mask == mask_type['FV'], 1, 0)
+        sand_mask = np.where(mask == mask_type['SR'], 1, 0)
+        
+        masks=np.array([human_mask,
+                        plant_mask,
+                        wreck_mask,
+                        robot_mask,
+                        reef_mask,
+                        fish_mask,
+                        sand_mask
+                        ])
+        
+        img = np.transpose(img, (2, 0, 1))
+        img_tensor = torch.from_numpy(img).float()
+        masks_tensor = torch.from_numpy(masks).float()
 
-        # Normalize and process mask
-        mask = np.array(mask) / 255.0
-        mask[mask > 0.5] = 1
-        mask[mask <= 0.5] = 0
+        return img_tensor, masks_tensor
 
-        # Process mask using helper functions
-        if self.sal:
-            mask_processed = get_saliency(mask)
-        else:
-            mask_processed = get_robot_fish_human_reef_wrecks(mask)
 
-        return img, torch.from_numpy(mask_processed).float()
-
-# Helper function to get image paths
-def get_paths(data_dir):
-    exts = ['*.png', '*.PNG', '*.jpg', '*.JPG', '*.JPEG', '*.bmp']
-    image_paths = []
-    for pattern in exts:
-        for root, dirs, files in os.walk(data_dir):
-            for file in fnmatch.filter(files, pattern):
-                image_paths.append(os.path.join(root, file))
-    return image_paths
-
-# Define data transformations
-data_transforms = transforms.Compose([
-    transforms.Resize((256, 256)),  # Resize images and masks
-    transforms.RandomHorizontalFlip(),
-    transforms.RandomRotation(20),
-    transforms.ToTensor()
-])
-
-# Initialize dataset and dataloader
-train_dataset = SUIMDataset(
-    img_dir='/path/to/images',
-    mask_dir='/path/to/masks',
-    transform=data_transforms,
-    sal=False  # Change to True if using saliency processing
-)
-
-train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=4)
-
-# Now the train_loader can be used in the training loop
+if __name__=="__main__":
+    train_dir = "/home/liw324/code/data/SUIM_datasets/SUIM/train_val"
+    img_dir = f"{train_dir}/images"
+    mask_dir = f"{train_dir}/masks"
+    
+    # data_gen_args = transforms.Compose([
+    #     transforms.RandomRotation(20),
+    #     transforms.RandomHorizontalFlip(),
+    #     transforms.RandomResizedCrop((255,255), scale=(0.95, 1.05)),
+    # ])
+    
+    # train_dataset=SUIMDataset(img_dir=img_dir,mask_dir=mask_dir,transform=data_gen_args)
+    # # print(len(train_dataset))
+    # train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, num_workers=4)
+    # for i,item in enumerate(train_loader):
+    #     print(item)
