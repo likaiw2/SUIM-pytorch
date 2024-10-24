@@ -68,6 +68,7 @@ class SUIMDataset(Dataset):
 
     def __getitem__(self, idx):
         # Open image and masks
+        img_name = self.img_list[idx][:-4]
         img = Image.open(f"{self.img_dir}/{self.img_list[idx]}")
         mask = Image.open(f"{self.mask_dir}/{self.mask_list[idx]}")
 
@@ -100,7 +101,7 @@ class SUIMDataset(Dataset):
         img_tensor = torch.from_numpy(img).float()
         masks_tensor = torch.from_numpy(masks).float()
 
-        return img_tensor, masks_tensor
+        return img_tensor, masks_tensor,img_name
 
 
 if __name__=="__main__":

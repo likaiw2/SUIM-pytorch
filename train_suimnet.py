@@ -8,16 +8,27 @@ from torchvision.datasets import ImageFolder
 from torch.optim.lr_scheduler import StepLR
 from models.suim_net import SUIMNet  # Import your PyTorch version of the SUIMNet
 from utils.data_utils import SUIMDataset  # Assume we have an equivalent function for DataLoader
+from datetime import datetime
 from tqdm import tqdm
 
+
+current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
 # parameters
-dataset_name = "suim"
-train_dir = "/home/liw324/code/data/SUIM_datasets/SUIM/train_val"
+# dataset_name = "SUIM"
+# dataset_name = "SUIM_lowlight"
+dataset_name = "SUIM_lowlight_enhance"
+
+train_dir = f"/home/liw324/code/data/SUIM_datasets/{dataset_name}/train_val"
+ckpt_dir = f"/home/liw324/code/SUIM-pytorch/ckpt/{dataset_name}_{current_time}"
+
 img_dir = f"{train_dir}/images"
 mask_dir = f"{train_dir}/masks"
-ckpt_dir = "/home/liw324/code/SUIM-pytorch/ckpt/"
-device = torch.device("cuda:1")
-batch_size = 32
+
+model_ckpt_name = "/home/liw324/code/SUIM-pytorch/ckpt/#best/low_light_fine_tune_epoch_16_loss0.1581_acc_97.09524972098214.pth"
+device = torch.device("cuda:0")
+batch_size = 16
 num_epochs = 50
 learning_rate = 1e-4
 base_ = 'VGG'
@@ -30,7 +41,6 @@ else:
     im_res_ = (320, 256, 3)
     ckpt_name = "suimnet_vgg"
 
-model_ckpt_name = os.path.join(ckpt_dir, ckpt_name)
 if not os.path.exists(ckpt_dir):
     os.makedirs(ckpt_dir)
 
@@ -69,14 +79,17 @@ def save_checkpoint(model, filename):
     torch.save(model.state_dict(), filename)
     
 def wandb_init():
-    wandb.init(project="suim-pytorch")
-    wandb.base_=base_
-    wandb.batch_size = 32
-    wandb.num_epochs = 50
-    wandb.learning_rate = 1e-4
-    wandb.train_size = train_size
-    wandb.val_size = val_size
-    wandb.device=device
+    wandb.init(project="suim-pytorch",
+               config={"base_":base_,
+                       "batch_size":batch_size,
+                       "num_epochs":num_epochs,
+                       "learning_rate":learning_rate,
+                       "train_size":train_size,
+                       "val_size" :val_size,
+                       "device":device,
+                       "start_time":current_time,
+                       "dataset":dataset_name}
+               )
     
 wandb_init()
     
@@ -87,7 +100,7 @@ for epoch in tqdm(range(num_epochs),unit="epoch"):
     # Training
     suimnet.train() 
     running_loss = 0.0
-    for i, (images, masks) in enumerate(train_loader):
+    for i, (images, masks,_) in enumerate(train_loader):
         images = images.to(device)
         masks = masks.to(device)
 
@@ -104,40 +117,45 @@ for epoch in tqdm(range(num_epochs),unit="epoch"):
     # Validating
     suimnet.eval()  
     val_loss = 0.0
-    correct = 0
-    total = 0
-    for i, (images, masks) in enumerate(val_loader):
+    sum_acc=0
+    for i, (images, masks, _) in enumerate(val_loader):
         images = images.to(device)
         masks = masks.to(device)
         
         outputs = suimnet(images)
+        
+        # print("outputs: ",outputs.shape)
+        # print("masks: ",masks.shape)
+        
         loss = criterion(outputs, masks)
 
         val_loss += loss.item()
-        wandb.log({'val_iter_loss': loss.item()})
-
-        _, predicted = torch.max(outputs.data, 1)
-        total += masks.size(0)
-        correct += (predicted == masks).sum().item()
+        bin_outputs = (outputs >= 0.5).int()
+        accuracy = (bin_outputs == masks).sum().item() / outputs.numel()
+        sum_acc += accuracy
+        
+        wandb.log({'val_iter_loss': loss.item(),
+                   'val_acc': accuracy})
         
     # Scheduler step
     scheduler.step()
 
     # Print epoch loss
     epoch_loss = running_loss / len(train_loader)
-    accuracy = 100 * correct / total
-    print(f'train_loss: {epoch_loss:.4f}        val_loss: {val_loss / len(val_loader):.4f}        accuracy: {accuracy}')
+    epoch_acc = 100 * sum_acc / len(val_loader)
+    
+    print(f'train_loss: {epoch_loss:.4f}        val_loss: {val_loss / len(val_loader):.4f}        epoch_accuracy: {epoch_acc:.4f}')
     wandb.log({'train_epoch_loss':epoch_loss,
                'val_epoch_loss':val_loss / len(val_loader),
-               'accuracy':accuracy
+               'epoch_accuracy':epoch_acc
                })
 
     # Save model checkpoint if it improves
     if epoch_loss < best_loss:
         print(f'Saving model with loss {epoch_loss:.4f}')
         best_loss = epoch_loss
-        save_checkpoint(suimnet, f"{model_ckpt_name}_epoch_{epoch}_loss{epoch_loss:.4f}_acc_{accuracy}.pth")
+        save_checkpoint(suimnet, f"{ckpt_dir}/{dataset_name}_epoch_{epoch}_loss{epoch_loss:.4f}_acc_{accuracy:.4f}.pth")
     if accuracy > best_accuracy:
         print(f'Saving model with acc {accuracy}')
         best_accuracy = accuracy
-        save_checkpoint(suimnet, f"{model_ckpt_name}_epoch_{epoch}_loss{epoch_loss:.4f}_acc_{accuracy}.pth")
+        save_checkpoint(suimnet, f"{ckpt_dir}/{dataset_name}_epoch_{epoch}_loss{epoch_loss:.4f}_acc_{accuracy:.4f}.pth")

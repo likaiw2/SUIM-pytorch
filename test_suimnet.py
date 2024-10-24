@@ -1,88 +1,110 @@
 import os
-import ntpath
-import numpy as np
-from PIL import Image
 import torch
+import numpy as np
+from torch.utils.data import DataLoader
 from torchvision import transforms
-from suim_net import SUIMNet  # Import your PyTorch version of SUIM-Net
-from utils.data_utils import get_paths  # Assume this function is already converted
+from models.suim_net import SUIMNet  # Import your PyTorch version of the SUIMNet
+from utils.data_utils import SUIMDataset, mask_code_to_image  # Assume we have an equivalent function for DataLoader
+from datetime import datetime
+from tqdm import tqdm
+from PIL import Image
 
-# Experiment directories
-test_dir = "/home/liw324/code/data/SUIM_datasets/SUIM/TEST"
-samples_dir = "data/test/output/"
-RO_dir = samples_dir + "RO/"
-FB_dir = samples_dir + "FV/"
-WR_dir = samples_dir + "WR/"
-HD_dir = samples_dir + "HD/"
-RI_dir = samples_dir + "RI/"
+mask_type={"HD":1,      # HD: Human divers
+           "PF":2,      # PF: Plants/sea-grass
+           "WR":3,      # WR: Wrecks/ruins
+           "RO":4,      # RO: Robots/instruments
+           "RI":5,      # RI: Reefs and invertebrates
+           "FV":6,      # FV: Fish and vertebrates
+           "SR":7       # SR: Sand/sea-floor (& rocks)
+           }  
+
+
+# parameters
+# dataset_name = "SUIM"
+# dataset_name = "SUIM_lowlight"
+dataset_name = "SUIM_lowlight_enhance"
+
+model_ckpt_name = "/home/liw324/code/SUIM-pytorch/ckpt/#best/low_light_fine_tune_epoch_16_loss0.1581_acc_97.09524972098214.pth"
+
+train_dir = f"/home/liw324/code/data/SUIM_datasets/{dataset_name}/train_val"
+
+img_dir = f"{train_dir}/images"
+mask_dir = f"{train_dir}/masks"
+
+device = torch.device("cuda:0")
+batch_size = 16
+base_ = 'VGG'
+
+# parameters
+# dataset_name = "SUIM"
+# dataset_name = "SUIM_lowlight"
+dataset_name = "SUIM_lowlight_enhance"
+
+test_dir = f"/home/liw324/code/data/SUIM_datasets/{dataset_name}/TEST"
+img_dir = f"{train_dir}/images"
+mask_dir = f"{train_dir}/masks"
+
+out_dir = f"/home/liw324/code/SUIM-pytorch/test_output/{dataset_name}/"
+device = torch.device("cuda:0")
+batch_size = 16
+base_ = 'VGG'
+im_res_ = (320, 256, 3)
+
 
 # Create output directories if they don't exist
-os.makedirs(samples_dir, exist_ok=True)
-os.makedirs(RO_dir, exist_ok=True)
-os.makedirs(FB_dir, exist_ok=True)
-os.makedirs(WR_dir, exist_ok=True)
-os.makedirs(HD_dir, exist_ok=True)
-os.makedirs(RI_dir, exist_ok=True)
+os.makedirs(out_dir, exist_ok=True)
+for cate in mask_type:
+    os.makedirs(f"{out_dir}/{cate}", exist_ok=True)
 
 # Model configuration
 base_ = 'VGG'  # or 'RSB'
-if base_ == 'RSB':
-    im_res_ = (320, 240, 3)
-    ckpt_name = "suimnet_rsb5.pth"
-else:
-    im_res_ = (320, 256, 3)
-    ckpt_name = "suimnet_vgg5.pth"
+im_res_ = (320, 256, 3)
 
-# Initialize model and load weights
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-suimnet = SUIMNet(base=base_, im_res=(im_res_[1], im_res_[0]), n_classes=5)
+
+# 加载模型
+suimnet = SUIMNet(base=base_, im_res=(im_res_[1], im_res_[0]), n_classes=7)
 suimnet = suimnet.to(device)
-suimnet.load_state_dict(torch.load(join("ckpt/saved/", ckpt_name)))
+suimnet.load_state_dict(torch.load(model_ckpt_name))  # load the pretrained model
 suimnet.eval()
 
-# Input/output shapes
-im_h, im_w = im_res_[1], im_res_[0]
-
-# Define preprocessing transforms
-preprocess = transforms.Compose([
-    transforms.Resize((im_h, im_w)),
-    transforms.ToTensor()
+# Dataset
+data_gen_args = transforms.Compose([
+    transforms.Resize((im_res_[1], im_res_[0])),  # only resize for test
 ])
 
-def test_generator():
-    # Test all images in the directory
-    assert os.path.exists(test_dir), "Local image path doesn't exist"
-    
-    for p in get_paths(test_dir):
-        # Read and scale inputs
-        img = Image.open(p)
-        img_tensor = preprocess(img).unsqueeze(0).to(device)
-        
-        # Inference
-        with torch.no_grad():
-            out_img = suimnet(img_tensor)
-        
-        # Thresholding
-        out_img = (out_img > 0.5).float()
-        
-        print(f"Tested: {p}")
-        
-        # Get filename
-        img_name = ntpath.basename(p).split('.')[0] + '.bmp'
-        
-        # Save individual output masks
-        out_img = out_img.squeeze(0).cpu().numpy()
-        ROs = np.uint8(out_img[0, :, :] * 255)
-        FVs = np.uint8(out_img[1, :, :] * 255)
-        HDs = np.uint8(out_img[2, :, :] * 255)
-        RIs = np.uint8(out_img[3, :, :] * 255)
-        WRs = np.uint8(out_img[4, :, :] * 255)
-        
-        Image.fromarray(ROs).save(RO_dir + img_name)
-        Image.fromarray(FVs).save(FB_dir + img_name)
-        Image.fromarray(HDs).save(HD_dir + img_name)
-        Image.fromarray(RIs).save(RI_dir + img_name)
-        Image.fromarray(WRs).save(WR_dir + img_name)
+# Dataset and DataLoader 
+dataset = SUIMDataset(img_dir, mask_dir, transform=data_gen_args)
+test_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=4)
 
-# Test images
-test_generator()
+
+def evaluate_model(model, test_loader, device):
+    model.eval()
+    sum_acc=0
+    with torch.no_grad():
+        for images, masks, img_names in tqdm(test_loader, unit="batch"):
+            images = images.to(device)
+            masks = masks.to(device)
+            
+            outputs = model(images)
+            bin_outputs = (outputs >= 0.5).int()
+            
+            accuracy = (bin_outputs == masks).sum().item() / outputs.numel()
+            sum_acc += accuracy
+            
+            bin_outputs = bin_outputs.cpu().numpy()
+            
+            for item_in_each_batch,img_name in zip(bin_outputs,img_names):
+                img_name = img_name + '.bmp'
+                for category,bin_mask in zip(mask_type,item_in_each_batch):
+                    mask = mask_type[category]*bin_mask
+                    mask_image = mask_code_to_image(mask)
+
+                    img_path = f"{out_dir}/{category}/{img_name}"
+                    mask_image = np.transpose(mask_image, (1, 2, 0))
+                    Image.fromarray(mask_image).save(img_path)
+            
+    avg_acc = 100 * sum_acc/ len(test_loader)
+    print(avg_acc)
+
+# run the test
+evaluate_model(suimnet, test_loader, device)
