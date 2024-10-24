@@ -162,7 +162,7 @@ class SuimDecoderRSB(nn.Module):
 
 # Model class to combine encoder and decoder
 class SUIMNet(nn.Module):
-    def __init__(self, base='RSB', im_res=(320, 240), n_classes=5):
+    def __init__(self, base='RSB', n_classes=5):
         super(SUIMNet, self).__init__()
         self.base = base
         self.n_classes = n_classes
@@ -210,5 +210,5 @@ class SUIMNet(nn.Module):
             return torch.sigmoid(out)  # 使用 sigmoid 作为激活函数（适用于二元分割）
 
 if __name__ == "__main__":
-    model = SUIMNet(base='VGG', im_res=(320, 240), n_classes=5)
+    model = SUIMNet(base='VGG', n_classes=5)
     print(model)

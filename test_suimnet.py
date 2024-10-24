@@ -24,14 +24,15 @@ dataset_name = "SUIM"
 # dataset_name = "SUIM_lowlight"
 # dataset_name = "SUIM_lowlight_enhance"
 
-model_ckpt_name = "/home/liw324/code/SUIM-pytorch/ckpt/#best/suim_epoch_19_loss0.1633_acc_0.0.pth"
+model_ckpt_name = "/home/liw324/code/SUIM-pytorch/ckpt/first_train_20241023_020340/suimnet_vgg_epoch_19_loss0.1633_acc_0.0.pth"
+# model_ckpt_name = "/home/liw324/code/SUIM-pytorch/ckpt/SUIM_lowlight_enhance_20241023_170852/SUIM_lowlight_enhance_epoch_20_loss0.1489_acc_0.9970319475446429.pth"
 
 test_dir = f"/home/liw324/code/data/SUIM_datasets/{dataset_name}/TEST"
 img_dir = f"{test_dir}/images"
 mask_dir = f"{test_dir}/masks"
 
 out_dir = f"/home/liw324/code/SUIM-pytorch/test_output/{dataset_name}"
-device = torch.device("cuda:0")
+device = torch.device("cuda:1")
 batch_size = 16
 base_ = 'VGG'
 im_res_ = (320, 256, 3)
@@ -42,13 +43,9 @@ os.makedirs(out_dir, exist_ok=True)
 for cate in mask_type:
     os.makedirs(f"{out_dir}/{cate}", exist_ok=True)
 
-# Model configuration
-base_ = 'VGG'  # or 'RSB'
-im_res_ = (320, 256, 3)
-
 
 # 加载模型
-suimnet = SUIMNet(base=base_, im_res=(im_res_[1], im_res_[0]), n_classes=7)
+suimnet = SUIMNet(base=base_, n_classes=7)
 suimnet = suimnet.to(device)
 suimnet.load_state_dict(torch.load(model_ckpt_name))  # load the pretrained model
 suimnet.eval()
@@ -60,6 +57,7 @@ data_gen_args = transforms.Compose([
 
 # Dataset and DataLoader 
 dataset = SUIMDataset(img_dir, mask_dir, transform=data_gen_args)
+# dataset = SUIMDataset(img_dir, mask_dir)
 test_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=4)
 
 
@@ -73,12 +71,15 @@ def evaluate_model(model, test_loader, device):
             
             outputs = model(images)
             
-            max_values, _ = torch.max(outputs, dim=1)  # 形状为 [height, width]
+            # Find the most powerful feature
+            max_values, _ = torch.max(outputs, dim=1)
             max_values = torch.unsqueeze(max_values, dim=1)
-            
             outputs = torch.where(outputs == max_values, outputs, torch.zeros_like(outputs))
+            
+            # Make present to 0 or 1
             bin_outputs = (outputs >= 0.5).int()
             
+            # Calculate acc
             accuracy = (bin_outputs == masks).sum().item() / outputs.numel()
             sum_acc += accuracy
             

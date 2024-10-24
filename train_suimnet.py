@@ -132,7 +132,16 @@ for epoch in tqdm(range(num_epochs),unit="epoch"):
         loss = criterion(outputs, masks)
 
         val_loss += loss.item()
+        
+        # Find the most powerful feature
+        max_values, _ = torch.max(outputs, dim=1)
+        max_values = torch.unsqueeze(max_values, dim=1)
+        outputs = torch.where(outputs == max_values, outputs, torch.zeros_like(outputs))
+        
+        # Make present to 0 or 1
         bin_outputs = (outputs >= 0.5).int()
+        
+        # Calculate acc
         accuracy = (bin_outputs == masks).sum().item() / outputs.numel()
         sum_acc += accuracy
         
