@@ -57,6 +57,7 @@ class SUIMDataset(Dataset):
         
         self.img_list = sorted(os.listdir(img_dir))
         self.mask_list = sorted(os.listdir(mask_dir))
+        self.mask_list = [item for item in sorted(os.listdir(mask_dir)) if os.path.isfile(os.path.join(mask_dir, item))]
         assert len(self.img_list)==len(self.mask_list),"the number of img and mask not paired"
         
         self.transform = transform

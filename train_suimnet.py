@@ -16,17 +16,19 @@ current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 # parameters
-# dataset_name = "SUIM"
+dataset_name = "SUIM"
 # dataset_name = "SUIM_lowlight"
-dataset_name = "SUIM_lowlight_enhance"
+# dataset_name = "SUIM_lowlight_enhance"
 
 train_dir = f"/home/liw324/code/data/SUIM_datasets/{dataset_name}/train_val"
-ckpt_dir = f"/home/liw324/code/SUIM-pytorch/ckpt/{dataset_name}_{current_time}"
+ckpt_dir = f"/home/liw324/code/SUIM-pytorch/ckpt/{current_time}_{dataset_name}"
 
 img_dir = f"{train_dir}/images"
 mask_dir = f"{train_dir}/masks"
 
-model_ckpt_name = "/home/liw324/code/SUIM-pytorch/ckpt/#best/low_light_fine_tune_epoch_16_loss0.1581_acc_97.09524972098214.pth"
+# model_ckpt_name = "/home/liw324/code/SUIM-pytorch/ckpt/#best/low_light_fine_tune_epoch_16_loss0.1581_acc_97.09524972098214.pth"
+model_ckpt_name = ""
+
 device = torch.device("cuda:0")
 batch_size = 16
 num_epochs = 50
@@ -154,8 +156,8 @@ for epoch in tqdm(range(num_epochs),unit="epoch"):
     if epoch_loss < best_loss:
         print(f'Saving model with loss {epoch_loss:.4f}')
         best_loss = epoch_loss
-        save_checkpoint(suimnet, f"{ckpt_dir}/{dataset_name}_epoch_{epoch}_loss{epoch_loss:.4f}_acc_{accuracy:.4f}.pth")
-    if accuracy > best_accuracy:
+        save_checkpoint(suimnet, f"{ckpt_dir}/{dataset_name}_epoch_{epoch}_loss{epoch_loss:.4f}_acc_{epoch_acc:.4f}.pth")
+    if epoch_acc > best_accuracy:
         print(f'Saving model with acc {accuracy}')
-        best_accuracy = accuracy
-        save_checkpoint(suimnet, f"{ckpt_dir}/{dataset_name}_epoch_{epoch}_loss{epoch_loss:.4f}_acc_{accuracy:.4f}.pth")
+        best_accuracy = epoch_acc
+        save_checkpoint(suimnet, f"{ckpt_dir}/{dataset_name}_epoch_{epoch}_loss{epoch_loss:.4f}_acc_{epoch_acc:.4f}.pth")

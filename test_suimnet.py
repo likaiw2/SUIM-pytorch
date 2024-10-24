@@ -20,31 +20,17 @@ mask_type={"HD":1,      # HD: Human divers
 
 
 # parameters
-# dataset_name = "SUIM"
+dataset_name = "SUIM"
 # dataset_name = "SUIM_lowlight"
-dataset_name = "SUIM_lowlight_enhance"
+# dataset_name = "SUIM_lowlight_enhance"
 
-model_ckpt_name = "/home/liw324/code/SUIM-pytorch/ckpt/#best/low_light_fine_tune_epoch_16_loss0.1581_acc_97.09524972098214.pth"
-
-train_dir = f"/home/liw324/code/data/SUIM_datasets/{dataset_name}/train_val"
-
-img_dir = f"{train_dir}/images"
-mask_dir = f"{train_dir}/masks"
-
-device = torch.device("cuda:0")
-batch_size = 16
-base_ = 'VGG'
-
-# parameters
-# dataset_name = "SUIM"
-# dataset_name = "SUIM_lowlight"
-dataset_name = "SUIM_lowlight_enhance"
+model_ckpt_name = "/home/liw324/code/SUIM-pytorch/ckpt/#best/suim_epoch_19_loss0.1633_acc_0.0.pth"
 
 test_dir = f"/home/liw324/code/data/SUIM_datasets/{dataset_name}/TEST"
-img_dir = f"{train_dir}/images"
-mask_dir = f"{train_dir}/masks"
+img_dir = f"{test_dir}/images"
+mask_dir = f"{test_dir}/masks"
 
-out_dir = f"/home/liw324/code/SUIM-pytorch/test_output/{dataset_name}/"
+out_dir = f"/home/liw324/code/SUIM-pytorch/test_output/{dataset_name}"
 device = torch.device("cuda:0")
 batch_size = 16
 base_ = 'VGG'
@@ -81,11 +67,16 @@ def evaluate_model(model, test_loader, device):
     model.eval()
     sum_acc=0
     with torch.no_grad():
-        for images, masks, img_names in tqdm(test_loader, unit="batch"):
+        for images, masks, img_names in tqdm(test_loader, unit="pic"):
             images = images.to(device)
             masks = masks.to(device)
             
             outputs = model(images)
+            
+            max_values, _ = torch.max(outputs, dim=1)  # 形状为 [height, width]
+            max_values = torch.unsqueeze(max_values, dim=1)
+            
+            outputs = torch.where(outputs == max_values, outputs, torch.zeros_like(outputs))
             bin_outputs = (outputs >= 0.5).int()
             
             accuracy = (bin_outputs == masks).sum().item() / outputs.numel()
@@ -95,13 +86,22 @@ def evaluate_model(model, test_loader, device):
             
             for item_in_each_batch,img_name in zip(bin_outputs,img_names):
                 img_name = img_name + '.bmp'
+                merge_mask=np.zeros_like(item_in_each_batch[0])
+                # print(mask_type)
                 for category,bin_mask in zip(mask_type,item_in_each_batch):
                     mask = mask_type[category]*bin_mask
-                    mask_image = mask_code_to_image(mask)
+                    mask_image = mask_code_to_image(mask).astype(np.uint8)
 
                     img_path = f"{out_dir}/{category}/{img_name}"
-                    mask_image = np.transpose(mask_image, (1, 2, 0))
                     Image.fromarray(mask_image).save(img_path)
+                    
+                    merge_mask = merge_mask+mask
+                    
+                merge_mask = mask_code_to_image(merge_mask).astype(np.uint8)
+                img_path = f"{out_dir}/{img_name}"
+                Image.fromarray(merge_mask).save(img_path)
+                
+                
             
     avg_acc = 100 * sum_acc/ len(test_loader)
     print(avg_acc)
